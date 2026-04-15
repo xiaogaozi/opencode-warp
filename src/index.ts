@@ -1,26 +1,13 @@
 import type { Plugin } from "@opencode-ai/plugin"
-import type { Event, Part, Permission } from "@opencode-ai/sdk"
+import type { Event, Permission } from "@opencode-ai/sdk"
 
 import { buildPayload } from "./payload"
 import { warpNotify } from "./notify"
+import { truncate, extractTextFromParts } from "./utils"
 import pkg from "../package.json" with { type: "json" }
 
 const PLUGIN_VERSION = pkg.version
 const NOTIFICATION_TITLE = "warp://cli-agent"
-
-export function truncate(str: string, maxLen: number): string {
-  if (str.length <= maxLen) return str
-  return str.slice(0, maxLen - 3) + "..."
-}
-
-export function extractTextFromParts(parts: Part[]): string {
-  return parts
-    .filter((p): p is Part & { type: "text"; text: string } =>
-      p.type === "text" && "text" in p && Boolean(p.text),
-    )
-    .map((p) => p.text)
-    .join(" ")
-}
 
 function sendPermissionNotification(perm: Permission, cwd: string): void {
   const sessionId = perm.sessionID
