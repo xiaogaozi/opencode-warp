@@ -11,6 +11,8 @@ const NOTIFICATION_TITLE = "warp://cli-agent"
 
 type Logger = (msg: string) => void | Promise<void>
 
+const knownSessions = new Set<string>()
+
 function sendPermissionNotification(
   perm: Permission,
   cwd: string,
@@ -83,6 +85,7 @@ export const WarpPlugin: Plugin = async ({ client, directory }) => {
         switch (event.type) {
           case "session.created": {
             const sessionId = event.properties.info.id
+            knownSessions.add(sessionId)
             const body = buildPayload("session_start", sessionId, cwd, {
               plugin_version: PLUGIN_VERSION,
             })
@@ -96,6 +99,18 @@ export const WarpPlugin: Plugin = async ({ client, directory }) => {
           case "session.idle": {
             await log("info")("session.idle received")
             const sessionId = event.properties.sessionID
+
+            if (sessionId && !knownSessions.has(sessionId)) {
+              await log("info")(`Resending session_start for unknown session: ${sessionId}`)
+              const startBody = buildPayload("session_start", sessionId, cwd, {
+                plugin_version: PLUGIN_VERSION,
+              })
+              const startResult = warpNotify(NOTIFICATION_TITLE, startBody)
+              if (!startResult.success) {
+                await log("error")(`warpNotify failed for session_start: ${startResult.error}`)
+              }
+              knownSessions.add(sessionId)
+            }
 
             let query = ""
             let response = ""
