@@ -132,32 +132,19 @@ export const WarpPlugin: Plugin = async ({ client, directory }) => {
             return
           }
 
-          case "message.part.updated": {
-            const part = (event.properties as { part: unknown }).part as {
-              type: string
-              tool?: string
-              state?: { status: string }
-              sessionID?: string
+          default: {
+            if ((event as any).type === "permission.asked") {
+              sendPermissionNotification((event as any).properties, cwd)
+              return
             }
-            if (part?.type !== "tool" || !part?.state) return
-
-            if (part.tool === "question" && part.state.status === "running") {
-              const sessionId = part.sessionID || ""
+            if ((event as any).type === "question.asked") {
+              const props = (event as any).properties as { sessionID?: string }
+              const sessionId = props?.sessionID || ""
               const body = buildPayload("question_asked", sessionId, cwd, {
-                tool_name: part.tool,
+                tool_name: "question",
               })
               warpNotify(NOTIFICATION_TITLE, body)
               return
-            }
-
-            return
-          }
-
-          default: {
-            // permission.asked is listed in the opencode docs but has no SDK type.
-            // Handle it with the same logic as permission.updated.
-            if ((event as any).type === "permission.asked") {
-              sendPermissionNotification((event as any).properties, cwd)
             }
           }
         }
