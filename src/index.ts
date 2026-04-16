@@ -9,7 +9,13 @@ import pkg from "../package.json" with { type: "json" }
 const PLUGIN_VERSION = pkg.version
 const NOTIFICATION_TITLE = "warp://cli-agent"
 
-function sendPermissionNotification(perm: Permission, cwd: string): void {
+type Logger = (msg: string) => void | Promise<void>
+
+function sendPermissionNotification(
+  perm: Permission,
+  cwd: string,
+  log?: Logger,
+): void {
   const sessionId = perm.sessionID
   const toolName = perm.type || "unknown"
   const metadata = perm.metadata || {}
@@ -36,7 +42,10 @@ function sendPermissionNotification(perm: Permission, cwd: string): void {
     tool_name: toolName,
     tool_input: metadata,
   })
-  warpNotify(NOTIFICATION_TITLE, body)
+  const result = warpNotify(NOTIFICATION_TITLE, body)
+  if (!result.success && log) {
+    void log(`warpNotify failed: ${result.error}`)
+  }
 }
 
 export const WarpPlugin: Plugin = async ({ client, directory }) => {
@@ -46,7 +55,7 @@ export const WarpPlugin: Plugin = async ({ client, directory }) => {
         service: "opencode-warp",
         level: "warn",
         message:
-          "⚠️ Detected unsupported Warp version. Please update Warp to use this pluginDetected unsupported Warp version. Please update Warp to use this plugin",
+          "⚠️ Detected unsupported Warp version. Please update Warp to use this plugin.",
       },
     })
     return {}
@@ -60,6 +69,12 @@ export const WarpPlugin: Plugin = async ({ client, directory }) => {
     },
   })
 
+  const log =
+    (level: "info" | "error") =>
+    (msg: string) => {
+      void client.app.log({ body: { service: "opencode-warp", level, message: msg } })
+    }
+
   return {
     event: async ({ event }: { event: Event }) => {
       const cwd = directory || ""
@@ -71,21 +86,31 @@ export const WarpPlugin: Plugin = async ({ client, directory }) => {
             const body = buildPayload("session_start", sessionId, cwd, {
               plugin_version: PLUGIN_VERSION,
             })
-            warpNotify(NOTIFICATION_TITLE, body)
+            const result = warpNotify(NOTIFICATION_TITLE, body)
+            if (!result.success) {
+              await log("error")(`warpNotify failed: ${result.error}`)
+            }
             return
           }
 
           case "session.idle": {
+            await log("info")("session.idle received")
             const sessionId = event.properties.sessionID
 
             let query = ""
             let response = ""
 
             if (sessionId) {
+              await log("info")("Fetching session messages")
               try {
-                const result = await client.session.messages({
-                  path: { id: sessionId },
+                const timeoutPromise = new Promise<never>((_, reject) => {
+                  setTimeout(() => reject(new Error("timeout")), 5000)
                 })
+                const result = await Promise.race([
+                  client.session.messages({ path: { id: sessionId } }),
+                  timeoutPromise,
+                ])
+                await log("info")("Session messages fetched successfully")
                 const messages = result.data
 
                 if (messages) {
@@ -105,22 +130,31 @@ export const WarpPlugin: Plugin = async ({ client, directory }) => {
                     response = extractTextFromParts(lastAssistant.parts)
                   }
                 }
-              } catch {
+              } catch (err) {
+                await log("info")(`Session messages fetch failed or timed out: ${err}`)
                 // If we can't fetch messages, send the notification without query/response
               }
+            } else {
+              await log("info")("No sessionId, skipping message fetch")
             }
 
+            await log("info")("Sending warpNotify for session.idle")
             const body = buildPayload("stop", sessionId, cwd, {
               query: truncate(query, 200),
               response: truncate(response, 200),
               transcript_path: "",
             })
-            warpNotify(NOTIFICATION_TITLE, body)
+            const notifyResult = warpNotify(NOTIFICATION_TITLE, body)
+            if (!notifyResult.success) {
+              await log("error")(`warpNotify failed: ${notifyResult.error}`)
+            } else {
+              await log("info")("warpNotify succeeded for session.idle")
+            }
             return
           }
 
           case "permission.updated": {
-            sendPermissionNotification(event.properties, cwd)
+            sendPermissionNotification(event.properties, cwd, log("error"))
             return
           }
 
@@ -128,28 +162,55 @@ export const WarpPlugin: Plugin = async ({ client, directory }) => {
             const { sessionID, response } = event.properties
             if (response === "reject") return
             const body = buildPayload("permission_replied", sessionID, cwd)
-            warpNotify(NOTIFICATION_TITLE, body)
+            const result = warpNotify(NOTIFICATION_TITLE, body)
+            if (!result.success) {
+              await log("error")(`warpNotify failed: ${result.error}`)
+            }
             return
           }
 
           default: {
             if ((event as any).type === "permission.asked") {
-              sendPermissionNotification((event as any).properties, cwd)
+              sendPermissionNotification(
+                (event as any).properties,
+                cwd,
+                log("error"),
+              )
               return
             }
             if ((event as any).type === "question.asked") {
-              const props = (event as any).properties as { sessionID?: string }
+              const props = (event as any).properties as {
+                id?: string
+                sessionID?: string
+                questions?: Array<{ header?: string; question?: string }>
+              }
               const sessionId = props?.sessionID || ""
-              const body = buildPayload("question_asked", sessionId, cwd, {
+              const questionInfo = props?.questions?.[0]
+              const header = questionInfo?.header || "Question"
+              const questionText = questionInfo?.question || ""
+              const summary = `${header}${questionText ? `: ${truncate(questionText, 120)}` : ""}`
+
+              const body = buildPayload("permission_request", sessionId, cwd, {
+                summary,
                 tool_name: "question",
+                tool_input: { id: props?.id, questions: props?.questions },
               })
-              warpNotify(NOTIFICATION_TITLE, body)
+              const result = warpNotify(NOTIFICATION_TITLE, body)
+              if (!result.success) {
+                await log("error")(`warpNotify failed: ${result.error}`)
+              }
               return
             }
           }
         }
       } catch (err) {
-        console.error(`[opencode-warp] event handler error for "${event.type}":`, err)
+        await client.app.log({
+          body: {
+            service: "opencode-warp",
+            level: "error",
+            message: `Event handler error for ${(event as any).type}: ${err}`,
+          },
+        })
       }
     },
   }

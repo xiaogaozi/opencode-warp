@@ -2,8 +2,10 @@ import { openSync, writeSync, closeSync } from "fs"
 
 const MAX_OSC_LENGTH = 4096
 
-function warpNotify(title: string, body: string): void {
-  if (!process.env.WARP_CLI_AGENT_PROTOCOL_VERSION) return
+function warpNotify(title: string, body: string): { success: boolean; error?: string } {
+  if (!process.env.WARP_CLI_AGENT_PROTOCOL_VERSION) {
+    return { success: false, error: "WARP_CLI_AGENT_PROTOCOL_VERSION not set" }
+  }
 
   const maxBodyLength = MAX_OSC_LENGTH - title.length - 20
   const truncatedBody =
@@ -17,15 +19,13 @@ function warpNotify(title: string, body: string): void {
       const fd = openSync("/dev/tty", "w")
       writeSync(fd, sequence)
       closeSync(fd)
-      return
+      return { success: true }
     } catch (err) {
       lastError = err as Error
     }
   }
 
-  console.error(
-    `[opencode-warp] Failed to send Warp notification after 3 attempts: ${lastError?.message}`,
-  )
+  return { success: false, error: lastError?.message ?? "unknown error" }
 }
 
 export { warpNotify }
