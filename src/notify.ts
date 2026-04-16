@@ -1,4 +1,4 @@
-import { writeFileSync } from "fs"
+import { openSync, writeSync, closeSync } from "fs"
 
 const MAX_OSC_LENGTH = 4096
 
@@ -14,7 +14,9 @@ function warpNotify(title: string, body: string): void {
   let lastError: Error | null = null
   for (let attempt = 0; attempt < 3; attempt++) {
     try {
-      writeFileSync("/dev/tty", sequence)
+      const fd = openSync("/dev/tty", "w")
+      writeSync(fd, sequence)
+      closeSync(fd)
       return
     } catch (err) {
       lastError = err as Error

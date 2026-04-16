@@ -141,9 +141,8 @@ export const WarpPlugin: Plugin = async ({ client, directory }) => {
             }
             if (part?.type !== "tool" || !part?.state) return
 
-            const sessionId = part.sessionID || ""
-
             if (part.tool === "question" && part.state.status === "running") {
+              const sessionId = part.sessionID || ""
               const body = buildPayload("question_asked", sessionId, cwd, {
                 tool_name: part.tool,
               })
@@ -151,25 +150,6 @@ export const WarpPlugin: Plugin = async ({ client, directory }) => {
               return
             }
 
-            if (part.state.status === "completed") {
-              const body = buildPayload("tool_complete", sessionId, cwd, {
-                tool_name: part.tool || "unknown",
-              })
-              warpNotify(NOTIFICATION_TITLE, body)
-              return
-            }
-            return
-          }
-
-          case "message.updated": {
-            const info = (event.properties as { info: { role?: string; sessionID?: string } }).info
-            if (info?.role !== "user") return
-
-            const sessionId = info.sessionID || ""
-            const body = buildPayload("prompt_submit", sessionId, cwd, {
-              query: "",
-            })
-            warpNotify(NOTIFICATION_TITLE, body)
             return
           }
 
