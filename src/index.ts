@@ -64,126 +64,125 @@ export const WarpPlugin: Plugin = async ({ client, directory }) => {
     event: async ({ event }: { event: Event }) => {
       const cwd = directory || ""
 
-      switch (event.type) {
-        case "session.created": {
-          const sessionId = event.properties.info.id
-          const body = buildPayload("session_start", sessionId, cwd, {
-            plugin_version: PLUGIN_VERSION,
-          })
-          warpNotify(NOTIFICATION_TITLE, body)
-          return
-        }
+      try {
+        switch (event.type) {
+          case "session.created": {
+            const sessionId = event.properties.info.id
+            const body = buildPayload("session_start", sessionId, cwd, {
+              plugin_version: PLUGIN_VERSION,
+            })
+            warpNotify(NOTIFICATION_TITLE, body)
+            return
+          }
 
-        case "session.idle": {
-          const sessionId = event.properties.sessionID
+          case "session.idle": {
+            const sessionId = event.properties.sessionID
 
-          let query = ""
-          let response = ""
+            let query = ""
+            let response = ""
 
-          if (sessionId) {
-            try {
-              const result = await client.session.messages({
-                path: { id: sessionId },
-              })
-              const messages = result.data
+            if (sessionId) {
+              try {
+                const result = await client.session.messages({
+                  path: { id: sessionId },
+                })
+                const messages = result.data
 
-              if (messages) {
-                const reversed = [...messages].reverse()
+                if (messages) {
+                  const reversed = [...messages].reverse()
 
-                const lastUser = reversed.find(
-                  (m) => m.info.role === "user",
-                )
-                if (lastUser) {
-                  query = extractTextFromParts(lastUser.parts)
+                  const lastUser = reversed.find(
+                    (m) => m.info.role === "user",
+                  )
+                  if (lastUser) {
+                    query = extractTextFromParts(lastUser.parts)
+                  }
+
+                  const lastAssistant = reversed.find(
+                    (m) => m.info.role === "assistant",
+                  )
+                  if (lastAssistant) {
+                    response = extractTextFromParts(lastAssistant.parts)
+                  }
                 }
-
-                const lastAssistant = reversed.find(
-                  (m) => m.info.role === "assistant",
-                )
-                if (lastAssistant) {
-                  response = extractTextFromParts(lastAssistant.parts)
-                }
+              } catch {
+                // If we can't fetch messages, send the notification without query/response
               }
-            } catch {
-              // If we can't fetch messages, send the notification without query/response
+            }
+
+            const body = buildPayload("stop", sessionId, cwd, {
+              query: truncate(query, 200),
+              response: truncate(response, 200),
+              transcript_path: "",
+            })
+            warpNotify(NOTIFICATION_TITLE, body)
+            return
+          }
+
+          case "permission.updated": {
+            sendPermissionNotification(event.properties, cwd)
+            return
+          }
+
+          case "permission.replied": {
+            const { sessionID, response } = event.properties
+            if (response === "reject") return
+            const body = buildPayload("permission_replied", sessionID, cwd)
+            warpNotify(NOTIFICATION_TITLE, body)
+            return
+          }
+
+          case "message.part.updated": {
+            const part = (event.properties as { part: unknown }).part as {
+              type: string
+              tool?: string
+              state?: { status: string }
+              sessionID?: string
+            }
+            if (part?.type !== "tool" || !part?.state) return
+
+            const sessionId = part.sessionID || ""
+
+            if (part.tool === "question" && part.state.status === "running") {
+              const body = buildPayload("question_asked", sessionId, cwd, {
+                tool_name: part.tool,
+              })
+              warpNotify(NOTIFICATION_TITLE, body)
+              return
+            }
+
+            if (part.state.status === "completed") {
+              const body = buildPayload("tool_complete", sessionId, cwd, {
+                tool_name: part.tool || "unknown",
+              })
+              warpNotify(NOTIFICATION_TITLE, body)
+              return
+            }
+            return
+          }
+
+          case "message.updated": {
+            const info = (event.properties as { info: { role?: string; sessionID?: string } }).info
+            if (info?.role !== "user") return
+
+            const sessionId = info.sessionID || ""
+            const body = buildPayload("prompt_submit", sessionId, cwd, {
+              query: "",
+            })
+            warpNotify(NOTIFICATION_TITLE, body)
+            return
+          }
+
+          default: {
+            // permission.asked is listed in the opencode docs but has no SDK type.
+            // Handle it with the same logic as permission.updated.
+            if ((event as any).type === "permission.asked") {
+              sendPermissionNotification((event as any).properties, cwd)
             }
           }
-
-          const body = buildPayload("stop", sessionId, cwd, {
-            query: truncate(query, 200),
-            response: truncate(response, 200),
-            transcript_path: "",
-          })
-          warpNotify(NOTIFICATION_TITLE, body)
-          return
         }
-
-        case "permission.updated": {
-          sendPermissionNotification(event.properties, cwd)
-          return
-        }
-
-        case "permission.replied": {
-          const { sessionID, response } = event.properties
-          if (response === "reject") return
-          const body = buildPayload("permission_replied", sessionID, cwd)
-          warpNotify(NOTIFICATION_TITLE, body)
-          return
-        }
-
-        case "message.part.updated": {
-          const part = (event.properties as { part: unknown }).part as {
-            type: string
-            tool?: string
-            state?: { status: string }
-            callID?: string
-          }
-          if (part?.type !== "tool" || !part?.state) return
-
-          const sessionId = (event.properties as { sessionID?: string }).sessionID || ""
-
-          if (part.tool === "question" && part.state.status === "running") {
-            const body = buildPayload("question_asked", sessionId, cwd, {
-              tool_name: part.tool,
-            })
-            warpNotify(NOTIFICATION_TITLE, body)
-            return
-          }
-
-          if (part.state.status === "completed") {
-            const body = buildPayload("tool_complete", sessionId, cwd, {
-              tool_name: part.tool || "unknown",
-            })
-            warpNotify(NOTIFICATION_TITLE, body)
-            return
-          }
-          return
-        }
-
-        case "message.updated": {
-          const info = (event.properties as { info: { role?: string; parts?: unknown[]; id?: string } }).info
-          if (info?.role !== "user") return
-
-          const sessionId = (event.properties as { sessionID?: string }).sessionID || ""
-          const queryText = extractTextFromParts(
-            info.parts as unknown as Parameters<typeof extractTextFromParts>[0],
-          )
-          if (!queryText) return
-
-          const body = buildPayload("prompt_submit", sessionId, cwd, {
-            query: truncate(queryText, 200),
-          })
-          warpNotify(NOTIFICATION_TITLE, body)
-          return
-        }
-
-        default: {
-          // permission.asked is listed in the opencode docs but has no SDK type.
-          // Handle it with the same logic as permission.updated.
-          if ((event as any).type === "permission.asked") {
-            sendPermissionNotification((event as any).properties, cwd)
-          }
-        }
+      } catch (err) {
+        console.error(`[opencode-warp] event handler error for "${event.type}":`, err)
       }
     },
   }
