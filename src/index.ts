@@ -77,8 +77,6 @@ export const WarpPlugin: Plugin = async ({ client, directory }) => {
         case "session.idle": {
           const sessionId = event.properties.sessionID
 
-          // Fetch the conversation to extract last query and response
-          // (port of on-stop.sh transcript parsing)
           let query = ""
           let response = ""
 
@@ -133,6 +131,52 @@ export const WarpPlugin: Plugin = async ({ client, directory }) => {
           return
         }
 
+        case "message.part.updated": {
+          const part = (event.properties as { part: unknown }).part as {
+            type: string
+            tool?: string
+            state?: { status: string }
+            callID?: string
+          }
+          if (part?.type !== "tool" || !part?.state) return
+
+          const sessionId = (event.properties as { sessionID?: string }).sessionID || ""
+
+          if (part.tool === "question" && part.state.status === "running") {
+            const body = buildPayload("question_asked", sessionId, cwd, {
+              tool_name: part.tool,
+            })
+            warpNotify(NOTIFICATION_TITLE, body)
+            return
+          }
+
+          if (part.state.status === "completed") {
+            const body = buildPayload("tool_complete", sessionId, cwd, {
+              tool_name: part.tool || "unknown",
+            })
+            warpNotify(NOTIFICATION_TITLE, body)
+            return
+          }
+          return
+        }
+
+        case "message.updated": {
+          const info = (event.properties as { info: { role?: string; parts?: unknown[]; id?: string } }).info
+          if (info?.role !== "user") return
+
+          const sessionId = (event.properties as { sessionID?: string }).sessionID || ""
+          const queryText = extractTextFromParts(
+            info.parts as unknown as Parameters<typeof extractTextFromParts>[0],
+          )
+          if (!queryText) return
+
+          const body = buildPayload("prompt_submit", sessionId, cwd, {
+            query: truncate(queryText, 200),
+          })
+          warpNotify(NOTIFICATION_TITLE, body)
+          return
+        }
+
         default: {
           // permission.asked is listed in the opencode docs but has no SDK type.
           // Handle it with the same logic as permission.updated.
@@ -141,45 +185,6 @@ export const WarpPlugin: Plugin = async ({ client, directory }) => {
           }
         }
       }
-    },
-
-    // Fires once per new user message — used to send the prompt_submit hook.
-    // (We avoid the generic message.updated event because OpenCode fires it
-    // multiple times per message, and a late duplicate can clobber the
-    // completion notification.)
-    "chat.message": async (input, output) => {
-      const cwd = directory || ""
-      const queryText = extractTextFromParts(output.parts)
-      if (!queryText) return
-
-      const body = buildPayload("prompt_submit", input.sessionID, cwd, {
-        query: truncate(queryText, 200),
-      })
-      warpNotify(NOTIFICATION_TITLE, body)
-    },
-
-    // Fires before a tool executes — used to detect the built-in
-    // "question" tool so Warp can notify the user that input is needed.
-    "tool.execute.before": async (input) => {
-      if (input.tool !== "question") return
-
-      const cwd = directory || ""
-      const body = buildPayload("question_asked", input.sessionID, cwd, {
-        tool_name: input.tool,
-      })
-      warpNotify(NOTIFICATION_TITLE, body)
-    },
-
-    // Tool completion — fires after every tool call
-    "tool.execute.after": async (input) => {
-      const toolName = input.tool
-      const sessionId = input.sessionID
-      const cwd = directory || ""
-
-      const body = buildPayload("tool_complete", sessionId, cwd, {
-        tool_name: toolName,
-      })
-      warpNotify(NOTIFICATION_TITLE, body)
     },
   }
 }
