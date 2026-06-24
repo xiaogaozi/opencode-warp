@@ -77,6 +77,22 @@ export const WarpPlugin: Plugin = async ({ client, directory }) => {
       void client.app.log({ body: { service: "opencode-warp", level, message: msg } })
     }
 
+  const subagentCache = new Map<string, boolean>()
+
+  async function isSubagentSession(sessionId?: string): Promise<boolean> {
+    if (!sessionId) return false
+    if (subagentCache.has(sessionId)) return subagentCache.get(sessionId)!
+    try {
+      const session = await client.session.get({ path: { id: sessionId } })
+      const result = !!session.data?.parentID
+      subagentCache.set(sessionId, result)
+      return result
+    } catch {
+      // If we can't fetch the session, fall through and notify anyway
+      return false
+    }
+  }
+
   return {
     event: async ({ event }: { event: Event }) => {
       const cwd = directory || ""
@@ -84,7 +100,9 @@ export const WarpPlugin: Plugin = async ({ client, directory }) => {
       try {
         switch (event.type) {
           case "session.created": {
-            const sessionId = event.properties.info.id
+            const info = event.properties.info
+            if (info.parentID) return
+            const sessionId = info.id
             knownSessions.add(sessionId)
             const body = buildPayload("session_start", sessionId, cwd, {
               plugin_version: PLUGIN_VERSION,
@@ -99,6 +117,11 @@ export const WarpPlugin: Plugin = async ({ client, directory }) => {
           case "session.idle": {
             await log("info")("session.idle received")
             const sessionId = event.properties.sessionID
+
+            if (await isSubagentSession(sessionId)) {
+              await log("info")(`Suppressing notifications for subagent session: ${sessionId}`)
+              return
+            }
 
             if (sessionId && !knownSessions.has(sessionId)) {
               await log("info")(`Resending session_start for unknown session: ${sessionId}`)
@@ -169,6 +192,7 @@ export const WarpPlugin: Plugin = async ({ client, directory }) => {
           }
 
           case "permission.updated": {
+            if (await isSubagentSession(event.properties.sessionID)) return
             sendPermissionNotification(event.properties, cwd, log("error"))
             return
           }
@@ -176,6 +200,7 @@ export const WarpPlugin: Plugin = async ({ client, directory }) => {
           case "permission.replied": {
             const { sessionID, response } = event.properties
             if (response === "reject") return
+            if (await isSubagentSession(sessionID)) return
             const body = buildPayload("permission_replied", sessionID, cwd)
             const result = warpNotify(NOTIFICATION_TITLE, body)
             if (!result.success) {
@@ -186,6 +211,7 @@ export const WarpPlugin: Plugin = async ({ client, directory }) => {
 
           default: {
             if ((event as any).type === "permission.asked") {
+              if (await isSubagentSession((event as any).properties?.sessionID)) return
               sendPermissionNotification(
                 (event as any).properties,
                 cwd,
@@ -200,6 +226,7 @@ export const WarpPlugin: Plugin = async ({ client, directory }) => {
                 questions?: Array<{ header?: string; question?: string }>
               }
               const sessionId = props?.sessionID || ""
+              if (await isSubagentSession(sessionId)) return
               const questionInfo = props?.questions?.[0]
               const header = questionInfo?.header || "Question"
               const questionText = questionInfo?.question || ""
