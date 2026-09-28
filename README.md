@@ -15,33 +15,32 @@ Notifications appear in Warp's notification center and as system notifications, 
 
 ## Installation
 
-### From npm (recommended)
+Requires OpenCode v2. This is a terminal (CLI) plugin and is configured in `cli.json`, not `opencode.json`.
 
-Add the plugin to your `opencode.json`:
+### From npm (once a V2-compatible version is published)
+
+Add the plugin to `~/.config/opencode/cli.json`:
 
 ```json
 {
-  "$schema": "https://opencode.ai/config.json",
-  "plugin": ["@warp-dot-dev/opencode-warp"]
+  "plugins": ["@warp-dot-dev/opencode-warp"]
 }
 ```
 
 ### From local files
 
-Copy or symlink the built plugin into your OpenCode plugins directory:
+Point OpenCode at the plugin directory. OpenCode loads the `./tui` entry (`tui.ts`):
 
-```bash
-# Global
-cp dist/index.js ~/.config/opencode/plugins/opencode-warp.js
-
-# Or project-level
-cp dist/index.js .opencode/plugins/opencode-warp.js
+```json
+{
+  "plugins": ["file:///absolute/path/to/opencode-warp"]
+}
 ```
 
 ## Requirements
 
 - [Warp terminal](https://warp.dev) (macOS, Linux, or Windows)
-- [OpenCode](https://opencode.ai) CLI
+- [OpenCode](https://opencode.ai) CLI v2
 
 ## How It Works
 
@@ -51,12 +50,13 @@ This plugin uses Warp's [pluggable notifications](https://docs.warp.dev/features
 2. Formats a concise notification payload
 3. Sends an OSC 777 escape sequence to Warp, which displays a native notification
 
-The plugin hooks into these OpenCode events:
+The plugin hooks into these OpenCode v2 events:
 - **session.created** — confirms the plugin is active
-- **session.idle** — fires when OpenCode finishes responding, includes your prompt and the response
-- **permission.updated** / **permission.asked** — fires when OpenCode needs tool approval
-- **message.updated** — fires when a user prompt is submitted
-- **tool.execute.after** — fires when a tool call completes
+- **session.execution.succeeded** / **session.execution.failed** — fires when OpenCode finishes responding, includes your prompt and the response (failures are reported as errors)
+- **permission.asked** / **permission.replied** — fires when OpenCode needs tool approval
+- **form.created** — fires when OpenCode asks a question
+
+OpenCode v2 delivers events for every location to every running client, so the plugin scopes notifications to the location it was loaded in: a session in another directory never raises notifications in this terminal.
 
 ## Configuration
 
@@ -80,7 +80,7 @@ bun run build
 
 ## Uninstall
 
-Remove `"@warp-dot-dev/opencode-warp"` from the `plugin` array in your `opencode.json`.
+Remove `"@warp-dot-dev/opencode-warp"` from the `plugins` array in `~/.config/opencode/cli.json`.
 
 ## Contributing
 
