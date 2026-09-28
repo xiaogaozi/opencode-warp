@@ -2,16 +2,18 @@
   "name": "@warp-dot-dev/opencode-warp",
   "version": "0.1.2",
   "description": "Warp terminal integration for OpenCode — native notifications and more",
-  "main": "dist/index.js",
-  "types": "dist/index.d.ts",
+  "exports": {
+    "./tui": "./src/tui.ts"
+  },
   "files": [
-    "dist"
+    "src",
+    "tui.ts"
   ],
   "scripts": {
     "build": "tsc",
     "typecheck": "tsc --noEmit",
     "test": "bun test",
-    "dev": "echo 'Add to your opencode.json: \"plugin\": [\"file://'$(pwd)'/src/index.ts\"]' && echo 'Then run: opencode'",
+    "dev": "echo 'Add to your cli.json: \"plugins\": [\"file://'$(pwd)'\"]' && echo 'Then run: opencode'",
     "prepublishOnly": "tsc"
   },
   "keywords": [
@@ -30,18 +32,17 @@
     "url": "git+https://github.com/warpdotdev/opencode-warp.git"
   },
   "devDependencies": {
-    "@opencode-ai/plugin": "^1.4.6",
+    "@opencode/plugin": "^2.0.18",
     "@types/node": "^25.5.0",
     "typescript": "^5.0.0"
   },
   "peerDependencies": {
-    "@opencode-ai/plugin": ">=1.0.0"
+    "@opencode/plugin": ">=2.0.0"
   },
   "directories": {
     "test": "tests"
   },
   "dependencies": {
-    "@opencode-ai/sdk": "^1.4.6",
     "undici-types": "^7.18.2",
     "zod": "^4.1.8"
   },
